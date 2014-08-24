@@ -34,14 +34,20 @@ var (
 	ErrCouldNotDetectUsername    = errors.New("pq: Could not detect default username. Please provide one explicitly.")
 )
 
-type drv struct{}
+type Driver struct {
+	Conn *conn
+}
 
-func (d *drv) Open(name string) (driver.Conn, error) {
-	return Open(name)
+func (d *Driver) Open(name string) (driver.Conn, error) {
+	c, err := Open(name)
+	if c != nil {
+		d.Conn = c.(*conn)
+	}
+	return c, err
 }
 
 func init() {
-	sql.Register("postgres", &drv{})
+	sql.Register("postgres", &Driver{})
 }
 
 type parameterStatus struct {
