@@ -118,13 +118,18 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 	b.string(q)
 	cn.send(b)
 
-	t, _ := cn.recv1()
+	t, r := cn.recv1()
+	// oh no :(
+	if t == 'E' {
+		panic(parseError(r))
+	}
+
 	// CopyBothResponse message
 	if t != 'W' {
-		panic("expected copy both")
+		panic("expected CopyBothResponse")
 	}
-	// now we are in streaming mode
 
+	// now we are in streaming mode
 	// current lsn
 	var lsn int64 = -1
 
@@ -165,6 +170,7 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 	// main receiver
 	go func() {
 		buffer := bytes.Buffer{}
+		// var start *time.Time
 		for {
 			t, r := cn.recv1()
 			t = r.byte()
@@ -197,11 +203,19 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				buf := bytes.NewReader(*r)
 				header := &XLogData{}
 				binary.Read(buf, binary.BigEndian, header)
+				// if start == nil {
+				// 	t := time.Now()
+				// 	start = &t
+				// }
 				// fmt.Println("WAL start", WAL(header.Start), "WAL end", WAL(header.End), "Clock", header.Clock)
 				buffer.Write((*r)[24:])
 				// fmt.Println("----------------------------")
-				// fmt.Println(string(bb[24:]))
+				// fmt.Println(string((*r)[24:]))
 				// fmt.Println("----------------------------")
+
+				if !((*r)[len(*r)-1] == '}' && (*r)[len(*r)-2] == '\n') {
+					continue
+				}
 
 				// this is some partial json
 				set := &ChangeSet{}
@@ -213,9 +227,13 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				} else if err != nil {
 					// fmt.Println("wait for more data", err)
 				} else {
+					// fmt.Println("msg len=", buffer.Len(), "took", time.Now().Sub(*start))
+					// start = nil
 					// OK case
 					buffer.Reset()
-					dec.Buffered().Read(buffer.Bytes())
+					// dec.Buffered().Read(buffer.Bytes())
+					// fmt.Println("got messages", string(buffer.Bytes()))
+					// fmt.Println("set ok")
 					set.LogPos = header.Start
 					set.confirm = confirm
 					msgs <- set
