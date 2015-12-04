@@ -214,7 +214,8 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				fmt.Println("----------------------------")
 
 				fmt.Println("ends", (*r)[len(*r)-1], (*r)[len(*r)-2], "should", '}', '\n')
-				if !((*r)[len(*r)-1] == '}' && (*r)[len(*r)-2] == '\n') {
+				s := (*r)[len(*r)-2]
+				if !((*r)[len(*r)-1] == '}' && (s == '\n' || s == ']')) {
 					continue
 				}
 
