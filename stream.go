@@ -230,11 +230,7 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				if discard {
 					buffer.Reset()
 					discard = false
-					msgs <- &ChangeSet{
-						LogPos:  header.Start,
-						confirm: confirm,
-						Changes: []Change{},
-					}
+					confirm <- header.Start
 				} else {
 					// this is some partial json
 					set := &ChangeSet{}
