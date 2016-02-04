@@ -213,7 +213,7 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 					buffer.Write((*r)[24:])
 				}
 
-				if buffer.Len() > 5000000 {
+				if !discard && buffer.Len() > 5000000 {
 					discard = true
 					fmt.Println("WARNING - huge changeset detected, skipping for now!")
 				}
