@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -15,21 +16,31 @@ type Fatalistic interface {
 	Fatal(args ...interface{})
 }
 
+func forceBinaryParameters() bool {
+	bp := os.Getenv("PQTEST_BINARY_PARAMETERS")
+	if bp == "yes" {
+		return true
+	} else if bp == "" || bp == "no" {
+		return false
+	} else {
+		panic("unexpected value for PQTEST_BINARY_PARAMETERS")
+	}
+}
+
 func openTestConnConninfo(conninfo string) (*sql.DB, error) {
-	datname := os.Getenv("PGDATABASE")
-	sslmode := os.Getenv("PGSSLMODE")
-	timeout := os.Getenv("PGCONNECT_TIMEOUT")
-
-	if datname == "" {
-		os.Setenv("PGDATABASE", "pqgotest")
+	defaultTo := func(envvar string, value string) {
+		if os.Getenv(envvar) == "" {
+			os.Setenv(envvar, value)
+		}
 	}
+	defaultTo("PGDATABASE", "pqgotest")
+	defaultTo("PGSSLMODE", "disable")
+	defaultTo("PGCONNECT_TIMEOUT", "20")
 
-	if sslmode == "" {
-		os.Setenv("PGSSLMODE", "disable")
-	}
-
-	if timeout == "" {
-		os.Setenv("PGCONNECT_TIMEOUT", "20")
+	if forceBinaryParameters() &&
+		!strings.HasPrefix(conninfo, "postgres://") &&
+		!strings.HasPrefix(conninfo, "postgresql://") {
+		conninfo = conninfo + " binary_parameters=yes"
 	}
 
 	return sql.Open("postgres", conninfo)
@@ -106,18 +117,96 @@ func TestCommitInFailedTransaction(t *testing.T) {
 }
 
 func TestOpenURL(t *testing.T) {
-	db, err := openTestConnConninfo("postgres://")
-	if err != nil {
-		t.Fatal(err)
+	testURL := func(url string) {
+		db, err := openTestConnConninfo(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		// database/sql might not call our Open at all unless we do something with
+		// the connection
+		txn, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		txn.Rollback()
 	}
-	defer db.Close()
-	// database/sql might not call our Open at all unless we do something with
-	// the connection
-	txn, err := db.Begin()
-	if err != nil {
-		t.Fatal(err)
+	testURL("postgres://")
+	testURL("postgresql://")
+}
+
+const pgpass_file = "/tmp/pqgotest_pgpass"
+func TestPgpass(t *testing.T) {
+	testAssert := func(conninfo string, expected string, reason string) {
+		conn, err := openTestConnConninfo(conninfo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+
+		txn, err := conn.Begin()
+		if err != nil {
+			if expected != "fail" {
+				t.Fatalf(reason, err)
+			}
+			return
+		}
+		rows, err := txn.Query("SELECT USER")
+		if err != nil {
+			txn.Rollback()
+			rows.Close()
+			if expected != "fail" {
+				t.Fatalf(reason, err)
+			}
+		} else {
+			if expected != "ok" {
+				t.Fatalf(reason, err)
+			}
+		}
+		txn.Rollback()
 	}
-	txn.Rollback()
+	testAssert("", "ok", "missing .pgpass, unexpected error %#v")
+	os.Setenv("PGPASSFILE", pgpass_file)
+	testAssert("host=/tmp", "fail", ", unexpected error %#v")
+	os.Remove(pgpass_file)
+	pgpass, err := os.OpenFile(pgpass_file, os.O_RDWR|os.O_CREATE, 0644)
+	if err != nil {
+		t.Fatalf("Unexpected error writing pgpass file %#v", err)
+	}
+	_, err = pgpass.WriteString(`# comment
+server:5432:some_db:some_user:pass_A
+*:5432:some_db:some_user:pass_B
+localhost:*:*:*:pass_C
+*:*:*:*:pass_fallback
+`)
+	if err != nil {
+		t.Fatalf("Unexpected error writing pgpass file %#v", err)
+	}
+	pgpass.Close()
+
+	assertPassword := func(extra values, expected string) {
+		o := &values{"host": "localhost", "sslmode": "disable", "connect_timeout": "20", "user": "majid", "port": "5432", "extra_float_digits": "2", "dbname": "pqgotest", "client_encoding": "UTF8", "datestyle": "ISO, MDY"}
+		for k, v := range extra {
+			(*o)[k] = v
+		}
+		(&conn{}).handlePgpass(*o)
+		if o.Get("password") != expected {
+			t.Fatalf("For %v expected %s got %s", extra, expected, o.Get("password"))
+		}
+	}
+	// wrong permissions for the pgpass file means it should be ignored
+	assertPassword(values{"host": "example.com", "user": "foo"}, "")
+	// fix the permissions and check if it has taken effect
+	os.Chmod(pgpass_file, 0600)
+	assertPassword(values{"host": "server", "dbname": "some_db", "user": "some_user"}, "pass_A")
+	assertPassword(values{"host": "example.com", "user": "foo"}, "pass_fallback")
+	assertPassword(values{"host": "example.com", "dbname": "some_db", "user": "some_user"}, "pass_B")
+	// localhost also matches the default "" and UNIX sockets
+	assertPassword(values{"host": "", "user": "some_user"}, "pass_C")
+	assertPassword(values{"host": "/tmp", "user": "some_user"}, "pass_C")
+	// cleanup
+	os.Remove(pgpass_file)
+	os.Setenv("PGPASSFILE", "")
 }
 
 func TestExec(t *testing.T) {
@@ -330,6 +419,59 @@ func TestEmptyQuery(t *testing.T) {
 	}
 }
 
+// Test that rows.Columns() is correct even if there are no result rows.
+func TestEmptyResultSetColumns(t *testing.T) {
+	db := openTestConn(t)
+	defer db.Close()
+
+	rows, err := db.Query("SELECT 1 AS a, text 'bar' AS bar WHERE FALSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cols) != 2 {
+		t.Fatalf("unexpected number of columns %d in response to an empty query", len(cols))
+	}
+	if rows.Next() {
+		t.Fatal("unexpected row")
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
+	}
+	if cols[0] != "a" || cols[1] != "bar" {
+		t.Fatalf("unexpected Columns result %v", cols)
+	}
+
+	stmt, err := db.Prepare("SELECT $1::int AS a, text 'bar' AS bar WHERE FALSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = stmt.Query(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cols, err = rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cols) != 2 {
+		t.Fatalf("unexpected number of columns %d in response to an empty query", len(cols))
+	}
+	if rows.Next() {
+		t.Fatal("unexpected row")
+	}
+	if rows.Err() != nil {
+		t.Fatal(rows.Err())
+	}
+	if cols[0] != "a" || cols[1] != "bar" {
+		t.Fatalf("unexpected Columns result %v", cols)
+	}
+
+}
+
 func TestEncodeDecode(t *testing.T) {
 	db := openTestConn(t)
 	defer db.Close()
@@ -342,6 +484,7 @@ func TestEncodeDecode(t *testing.T) {
 			'2000-1-1 01:02:03.04-7'::timestamptz,
 			0::boolean,
 			123,
+			-321,
 			3.14::float8
 		WHERE
 			    E'\\000\\001\\002'::bytea = $1
@@ -370,9 +513,9 @@ func TestEncodeDecode(t *testing.T) {
 	var got2 string
 	var got3 = sql.NullInt64{Valid: true}
 	var got4 time.Time
-	var got5, got6, got7 interface{}
+	var got5, got6, got7, got8 interface{}
 
-	err = r.Scan(&got1, &got2, &got3, &got4, &got5, &got6, &got7)
+	err = r.Scan(&got1, &got2, &got3, &got4, &got5, &got6, &got7, &got8)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,8 +544,12 @@ func TestEncodeDecode(t *testing.T) {
 		t.Fatalf("expected 123, got %d", got6)
 	}
 
-	if got7 != float64(3.14) {
-		t.Fatalf("expected 3.14, got %f", got7)
+	if got7 != int64(-321) {
+		t.Fatalf("expected -321, got %d", got7)
+	}
+
+	if got8 != float64(3.14) {
+		t.Fatalf("expected 3.14, got %f", got8)
 	}
 }
 

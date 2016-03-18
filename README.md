@@ -38,6 +38,7 @@ Optionally, a benchmark suite can be run as part of the tests:
 * Many libpq compatible environment variables
 * Unix socket support
 * Notifications: `LISTEN`/`NOTIFY`
+* pgpass support
 
 ## Future / Things you can help with
 
@@ -57,14 +58,17 @@ code still exists in here.
 * Brad Fitzpatrick (bradfitz)
 * Charlie Melbye (cmelbye)
 * Chris Bandy (cbandy)
+* Chris Gilling (cgilling)
 * Chris Walsh (cwds)
 * Dan Sosedoff (sosedoff)
 * Daniel Farina (fdr)
 * Eric Chlebek (echlebek)
+* Eric Garrido (minusnine)
 * Eric Urban (hydrogen18)
 * Everyone at The Go Team
 * Evan Shaw (edsrzf)
 * Ewan Chou (coocood)
+* Fazal Majid (fazalmajid)
 * Federico Romero (federomero)
 * Fumin (fumin)
 * Gary Burd (garyburd)
@@ -97,4 +101,5 @@ code still exists in here.
 * Timothée Peignier (cyberdelia)
 * Travis Cline (tmc)
 * TruongSinh Tran-Nguyen (truongsinh)
+* Yaismel Miranda (ympons)
 * notedit (notedit)
