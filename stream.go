@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 )
 
@@ -220,7 +221,11 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 
 				// kind of ugly but there is no other way - reusing the decoder does not work
 				dec := json.NewDecoder(bytes.NewReader(buffer.Bytes()))
-				if err := dec.Decode(&set); err != nil {
+				err := dec.Decode(&set)
+
+				if err == io.EOF {
+					// wait for more
+				} else if err != nil {
 					panic(err)
 				} else {
 					//fmt.Println("msg len=", buffer.Len(), "took", time.Now().Sub(*start))
