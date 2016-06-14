@@ -223,16 +223,19 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				dec := json.NewDecoder(bytes.NewReader(buffer.Bytes()))
 				err := dec.Decode(&set)
 
-				if err == io.EOF {
-					// wait for more
-				} else if err != nil {
-					panic(err)
-				} else {
+				switch err {
+				case io.EOF:
+					continue
+				case io.ErrUnexpectedEOF:
+					continue
+				case nil:
 					//fmt.Println("msg len=", buffer.Len(), "took", time.Now().Sub(*start))
 					buffer.Reset()
 					set.LogPos = header.Start
 					set.confirm = confirm
 					msgs <- set
+				default:
+					panic(err)
 				}
 			}
 		}
