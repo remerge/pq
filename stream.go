@@ -8,7 +8,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"io"
 	"time"
 )
 
@@ -103,6 +102,7 @@ func (cn *conn) StartReplicationStream(slot string, wal int64) (msgs chan *Chang
 	hi := uint32(wal >> 32)
 	lo := uint32(wal)
 	query := fmt.Sprintf("START_REPLICATION SLOT %s LOGICAL %X/%X", slot, hi, lo)
+	//query := fmt.Sprintf("START_REPLICATION SLOT %s LOGICAL %X/%X (\"pretty-print\" '0', \"write-in-chunks\" '0')", slot, hi, lo)
 	// fmt.Println("rep cmd:", query)
 	return cn.StreamQuery(query, wal)
 }
@@ -170,24 +170,20 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 	// main receiver
 	go func() {
 		buffer := bytes.Buffer{}
-		discard := false
-		// var start *time.Time
 		for {
 			t, r := cn.recv1()
 			t = r.byte()
-			// fmt.Println("recv1", string(t), t, string(*r))
 			switch t {
 			case 'k':
 				var serverWAL, time int64
 				var reply byte
 
-				// fmt.Println("keepalive", len(*r))
 				buf := bytes.NewReader(*r)
 				binary.Read(buf, binary.BigEndian, &serverWAL)
 				binary.Read(buf, binary.BigEndian, &time)
 				binary.Read(buf, binary.BigEndian, &reply)
 
-				// fmt.Println("serverWal", WAL(serverWAL), "time", time, "reply", reply)
+				//fmt.Println("serverWal", WAL(serverWAL), "time", time, "reply", reply)
 
 				if lsn == -1 {
 					lsn = 0
@@ -204,57 +200,35 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				buf := bytes.NewReader(*r)
 				header := &XLogData{}
 				binary.Read(buf, binary.BigEndian, header)
-				// if start == nil {
-				// 	t := time.Now()
-				// 	start = &t
-				// }
-				// fmt.Println("WAL start", WAL(header.Start), "WAL end", WAL(header.End), "Clock", header.Clock)
-				if !discard {
-					buffer.Write((*r)[24:])
-				}
 
-				if !discard && buffer.Len() > 5000000 {
-					discard = true
-					fmt.Println("WARNING - huge changeset detected, skipping for now!")
-				}
+				//fmt.Println("WAL start", WAL(header.Start), "WAL end", WAL(header.End), "Clock", header.Clock)
+
+				buffer.Write((*r)[24:])
+
 				// fmt.Println("----------------------------")
 				// fmt.Println(string((*r)[24:]))
 				// fmt.Println("----------------------------")
 				//
 				// fmt.Println("ends", (*r)[len(*r)-1], (*r)[len(*r)-2], "should", '}', '\n')
+
 				s := (*r)[len(*r)-2]
 				if !((*r)[len(*r)-1] == '}' && (s == '\n' || s == ']')) {
 					continue
 				}
 
-				if discard {
-					buffer.Reset()
-					discard = false
-					confirm <- header.Start
-				} else {
-					// this is some partial json
-					set := &ChangeSet{}
-					// kind of ugly but there is no other way - reusing the decoder does not work
-					dec := json.NewDecoder(bytes.NewReader(buffer.Bytes()))
-					// TODO this needs more error handling so we dont get stuck in the middle!
-					if err := dec.Decode(&set); err == io.EOF {
-						// fmt.Println("eof")
-					} else if err != nil {
-						// fmt.Println("wait for more data", err)
-					} else {
-						// fmt.Println("msg len=", buffer.Len(), "took", time.Now().Sub(*start))
-						// start = nil
-						// OK case
-						buffer.Reset()
-						// dec.Buffered().Read(buffer.Bytes())
-						// fmt.Println("got messages", string(buffer.Bytes()))
-						// fmt.Println("set ok")
-						set.LogPos = header.Start
-						set.confirm = confirm
-						msgs <- set
-					}
-				}
+				set := &ChangeSet{}
 
+				// kind of ugly but there is no other way - reusing the decoder does not work
+				dec := json.NewDecoder(bytes.NewReader(buffer.Bytes()))
+				if err := dec.Decode(&set); err != nil {
+					panic(err)
+				} else {
+					//fmt.Println("msg len=", buffer.Len(), "took", time.Now().Sub(*start))
+					buffer.Reset()
+					set.LogPos = header.Start
+					set.confirm = confirm
+					msgs <- set
+				}
 			}
 		}
 	}()
