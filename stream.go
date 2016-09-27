@@ -174,19 +174,19 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 		for {
 			t, r := cn.recv1()
 			t = r.byte()
-			fmt.Println("recv1", string(t), t, string(*r))
+			// fmt.Println("recv1", string(t), t, string(*r))
 			switch t {
 			case 'k':
 				var serverWAL, time int64
 				var reply byte
 
-				fmt.Println("keepalive", len(*r))
+				// fmt.Println("keepalive", len(*r))
 				buf := bytes.NewReader(*r)
 				binary.Read(buf, binary.BigEndian, &serverWAL)
 				binary.Read(buf, binary.BigEndian, &time)
 				binary.Read(buf, binary.BigEndian, &reply)
 
-				fmt.Println("serverWal", WAL(serverWAL), "time", time, "reply", reply)
+				fmt.Printf("wal pos=%v time=%v reply=%v\n", WAL(serverWAL), time, reply)
 
 				if lsn == -1 {
 					lsn = 0
@@ -207,14 +207,14 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 					t := time.Now()
 					start = &t
 				}
-				fmt.Println("WAL start", WAL(header.Start), "WAL end", WAL(header.End), "Clock", header.Clock)
+				fmt.Printf("header start=%v end=%v clock=%v\n", WAL(header.Start), WAL(header.End), header.Clock)
 				buffer.Write((*r)[24:])
 
-				fmt.Println("----------------------------")
-				fmt.Println(string((*r)[24:]))
-				fmt.Println("----------------------------")
+				// fmt.Println("----------------------------")
+				// fmt.Println(string((*r)[24:]))
+				// fmt.Println("----------------------------")
 				//
-				fmt.Println("ends", (*r)[len(*r)-1], (*r)[len(*r)-2], "should", '}', '\n')
+				// fmt.Println("ends", (*r)[len(*r)-1], (*r)[len(*r)-2], "should", '}', '\n')
 				s := (*r)[len(*r)-2]
 				if !((*r)[len(*r)-1] == '}' && (s == '\n' || s == ']')) {
 					continue
@@ -226,17 +226,17 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				dec := json.NewDecoder(bytes.NewReader(buffer.Bytes()))
 				// TODO this needs more error handling so we dont get stuck in the middle!
 				if err := dec.Decode(&set); err == io.EOF {
-					fmt.Println("eof")
+					// fmt.Println("eof")
 				} else if err != nil {
-					fmt.Println("wait for more data", err)
+					// fmt.Println("wait for more data", err)
 				} else {
-					fmt.Println("msg len=", buffer.Len(), "took", time.Now().Sub(*start))
+					fmt.Printf("msg len=%v time=%v\n", buffer.Len(), time.Now().Sub(*start))
 					// start = nil
 					// OK case
 					buffer.Reset()
 					// dec.Buffered().Read(buffer.Bytes())
-					fmt.Println("got messages", string(buffer.Bytes()))
-					fmt.Println("set ok")
+					// fmt.Println("got messages", string(buffer.Bytes()))
+					// fmt.Println("set ok")
 					set.LogPos = header.Start
 					set.confirm = confirm
 					msgs <- set
