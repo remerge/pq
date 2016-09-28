@@ -208,7 +208,7 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				// 	t := time.Now()
 				// 	start = &t
 				// }
-				// fmt.Println("WAL start", WAL(header.Start), "WAL end", WAL(header.End), "Clock", header.Clock)
+				fmt.Println("WAL start", WAL(header.Start), "WAL end", WAL(header.End), "Clock", header.Clock)
 				if !discard {
 					buffer.Write((*r)[24:])
 				}
@@ -217,11 +217,11 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 					discard = true
 					fmt.Println("WARNING - huge changeset detected, skipping for now!")
 				}
-				// fmt.Println("----------------------------")
-				// fmt.Println(string((*r)[24:]))
-				// fmt.Println("----------------------------")
-				//
-				// fmt.Println("ends", (*r)[len(*r)-1], (*r)[len(*r)-2], "should", '}', '\n')
+				fmt.Println("----------------------------")
+				fmt.Println(string((*r)[24:]))
+				fmt.Println("----------------------------")
+
+				fmt.Println("ends", (*r)[len(*r)-1], (*r)[len(*r)-2], "should", '}', '\n')
 				s := (*r)[len(*r)-2]
 				if !((*r)[len(*r)-1] == '}' && (s == '\n' || s == ']')) {
 					continue
