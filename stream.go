@@ -171,11 +171,14 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 	go func() {
 		buffer := bytes.Buffer{}
 		discard := false
+		var last byte
 		// var start *time.Time
 		for {
 			t, r := cn.recv1()
 			t = r.byte()
 			// fmt.Println("recv1", string(t), t, string(*r))
+			level := 0
+			inString := false
 			switch t {
 			case 'k':
 				var serverWAL, time int64
@@ -208,20 +211,42 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				// 	t := time.Now()
 				// 	start = &t
 				// }
-				fmt.Println("WAL start", WAL(header.Start), "WAL end", WAL(header.End), "Clock", header.Clock)
+
+				// msg should always start with a { if level is 0
+				if level == 0 && (*r)[24:][0] != '{' {
+					fmt.Printf("WARNING level is 0 but msg does not start with a { - TODO discard. msg->\n%q\n----------\n", (*r)[24:])
+					// TODO - set discard to true later
+				}
+
 				if !discard {
+					// scan for not escape open and close pairs
+					for _, c := range (*r)[24:] {
+						if !inString {
+							if c == '{' {
+								level++
+							}
+							if c == '}' {
+								level--
+							}
+						}
+						if last != '\\' && c == '"' {
+							inString = !inString
+						}
+						last = c
+					}
+
 					buffer.Write((*r)[24:])
 				}
 
-				if !discard && buffer.Len() > 5000000 {
+				if !discard && buffer.Len() > 1000000 {
 					discard = true
 					fmt.Println("WARNING - huge changeset detected, skipping for now!")
 				}
-				fmt.Println("----------------------------")
-				fmt.Println(string((*r)[24:]))
-				fmt.Println("----------------------------")
 
-				fmt.Println("ends", (*r)[len(*r)-1], (*r)[len(*r)-2], "should", '}', '\n')
+				fmt.Printf("----- chunk start wal_start=%v wal_end=%v level=%d discard=%t------\n", WAL(header.Start), WAL(header.End), level, discard)
+				fmt.Printf("%q\n", string((*r)[24:]))
+				fmt.Printf("----- chunk end c-1=%q c-2=%q --------\n", (*r)[len(*r)-1], (*r)[len(*r)-2])
+
 				s := (*r)[len(*r)-2]
 				if !((*r)[len(*r)-1] == '}' && (s == '\n' || s == ']')) {
 					continue
@@ -231,21 +256,25 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 					buffer.Reset()
 					discard = false
 					confirm <- header.Start
+					last = 0
+					level = 0
 				} else {
 					// this is some partial json
 					set := &ChangeSet{}
+					// in theory we only need to call decode if level is zero
 					// kind of ugly but there is no other way - reusing the decoder does not work
 					dec := json.NewDecoder(bytes.NewReader(buffer.Bytes()))
 					// TODO this needs more error handling so we dont get stuck in the middle!
 					if err := dec.Decode(&set); err == io.EOF {
 						// fmt.Println("eof")
 					} else if err != nil {
-						// fmt.Println("wait for more data", err)
+						fmt.Println("wait for more data", err)
 					} else {
-						// fmt.Println("msg len=", buffer.Len(), "took", time.Now().Sub(*start))
+						fmt.Printf("msg properly decoded len=%d level=%d", buffer.Len(), level)
 						// start = nil
 						// OK case
 						buffer.Reset()
+						last = 0
 						// dec.Buffered().Read(buffer.Bytes())
 						// fmt.Println("got messages", string(buffer.Bytes()))
 						// fmt.Println("set ok")
