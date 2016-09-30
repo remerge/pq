@@ -171,13 +171,14 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 	go func() {
 		buffer := bytes.Buffer{}
 		discard := false
-		var last byte
+		var last, secondLast byte
+		var level int
 		// var start *time.Time
 		for {
 			t, r := cn.recv1()
 			t = r.byte()
 			// fmt.Println("recv1", string(t), t, string(*r))
-			level := 0
+
 			inString := false
 			switch t {
 			case 'k':
@@ -229,9 +230,10 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 								level--
 							}
 						}
-						if last != '\\' && c == '"' {
+						if !(secondLast == '\\' && last == '\\') && last != '\\' && c == '"' {
 							inString = !inString
 						}
+						secondLast = last
 						last = c
 					}
 
@@ -243,7 +245,7 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 					fmt.Println("WARNING - huge changeset detected, skipping for now!")
 				}
 
-				fmt.Printf("----- chunk start wal_start=%v wal_end=%v level=%d discard=%t------\n", WAL(header.Start), WAL(header.End), level, discard)
+				fmt.Printf("----- chunk start wal_start=%v wal_end=%v level_after_msg=%d discard=%t------\n", WAL(header.Start), WAL(header.End), level, discard)
 				fmt.Printf("%q\n", string((*r)[24:]))
 				fmt.Printf("----- chunk end c-1=%q c-2=%q --------\n", (*r)[len(*r)-1], (*r)[len(*r)-2])
 
@@ -270,7 +272,7 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 					} else if err != nil {
 						fmt.Println("wait for more data", err)
 					} else {
-						fmt.Printf("msg properly decoded len=%d level=%d", buffer.Len(), level)
+						fmt.Printf("msg properly decoded len=%d level=%d\n", buffer.Len(), level)
 						// start = nil
 						// OK case
 						buffer.Reset()
