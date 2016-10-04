@@ -240,10 +240,10 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 					buffer.Write((*r)[24:])
 				}
 
-				if !discard && buffer.Len() > 1000000 {
-					discard = true
-					fmt.Println("WARNING - huge changeset detected, skipping for now!")
-				}
+				// if !discard && buffer.Len() > 1000000 {
+				// 	discard = true
+				// 	fmt.Println("WARNING - huge changeset detected, skipping for now!")
+				// }
 
 				fmt.Printf("----- chunk start wal_start=%v wal_end=%v level_after_msg=%d discard=%t------\n", WAL(header.Start), WAL(header.End), level, discard)
 				fmt.Printf("%q\n", string((*r)[24:]))
