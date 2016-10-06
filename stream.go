@@ -263,9 +263,24 @@ func (cn *conn) StreamQuery(q string, wal int64) (msgs chan *ChangeSet, err erro
 				} else {
 					// this is some partial json
 					set := &ChangeSet{}
+
+					// need to get rid of stupid control characters that JSON can't parse
+					// hackedy-hack-hack
+					str := buffer.Bytes()
+					b := make([]byte, len(str))
+					var bl int
+					for i := 0; i < len(str); i++ {
+						c := str[i]
+						if c >= 32 && c != 127 {
+							b[bl] = c
+							bl++
+						}
+					}
+
 					// in theory we only need to call decode if level is zero
 					// kind of ugly but there is no other way - reusing the decoder does not work
-					dec := json.NewDecoder(bytes.NewReader(buffer.Bytes()))
+					dec := json.NewDecoder(bytes.NewReader(b[:bl]))
+
 					// TODO this needs more error handling so we dont get stuck in the middle!
 					if err := dec.Decode(&set); err == io.EOF {
 						// fmt.Println("eof")
