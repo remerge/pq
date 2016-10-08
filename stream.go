@@ -1,11 +1,10 @@
 package pq
 
-// TODO - proper error handling!
-
 import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -110,11 +109,11 @@ func (cn *conn) StreamQuery(q string) (msgs chan *ChangeSet, err error) {
 	t, r := cn.recv1()
 
 	if t == 'E' {
-		panic(parseError(r))
+		return nil, parseError(r)
 	}
 
 	if t != 'W' {
-		panic("expected CopyBothResponse")
+		return nil, errors.New("expected CopyBothResponse")
 	}
 
 	// now we are in streaming mode
@@ -186,6 +185,7 @@ func (cn *conn) StreamQuery(q string) (msgs chan *ChangeSet, err error) {
 				msgs <- &cs
 
 				TRACE("recv msg header.Start=%v header.End=%v header.Clock=%v len=%v", WAL(cs.Header.Start), WAL(cs.Header.End), cs.Header.Clock, len(cs.Msg))
+
 				// wait for confirmation
 				confirm <- <-cs.confirm
 				<-confirmed
