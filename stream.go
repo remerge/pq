@@ -2,18 +2,22 @@ package pq
 
 import (
 	"bytes"
-	"database/sql/driver"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 )
 
-type XLogData struct {
+type XLogDataHeader struct {
 	Start uint64
 	End   uint64
 	Clock uint64
+}
+
+type XLogDataMsg struct {
+	Header  XLogDataHeader
+	Data    []byte
+	confirm chan uint64
 }
 
 type ResponseHeader struct {
@@ -31,20 +35,12 @@ type StatusResponse struct {
 	ReplyRequested byte
 }
 
-type ChangeSet struct {
-	Header  XLogData
-	Msg     []byte
-	confirm chan uint64
-}
-
-func (cs *ChangeSet) Confirm() {
-	cs.confirm <- cs.Header.Start
+func (msg *XLogDataMsg) Confirm() {
+	msg.confirm <- msg.Header.Start
 }
 
 func TRACE(format string, a ...interface{}) {
-	if os.Getenv("PQ_TRACE") == "1" {
-		fmt.Printf("[pq/stream] "+format+"\n", a...)
-	}
+	//fmt.Printf("[pq/stream] "+format+"\n", a...)
 }
 
 func WAL(i uint64) string {
@@ -83,7 +79,7 @@ func (cn *conn) feedback(lsn uint64) {
 	}
 }
 
-func (cn *conn) StartReplicationStream(slot string, wal uint64) (msgs chan *ChangeSet, err error) {
+func (cn *conn) StartReplicationStream(slot string, wal uint64) (msgs chan *XLogDataMsg, err error) {
 	hi := uint32(wal >> 32)
 	lo := uint32(wal)
 	query := fmt.Sprintf("START_REPLICATION SLOT %s LOGICAL %X/%X", slot, hi, lo)
@@ -91,14 +87,10 @@ func (cn *conn) StartReplicationStream(slot string, wal uint64) (msgs chan *Chan
 	return cn.StreamQuery(query)
 }
 
-func (cn *conn) SimpleQuery(q string) (res driver.Rows, err error) {
-	return cn.simpleQuery(q)
-}
-
-func (cn *conn) StreamQuery(q string) (msgs chan *ChangeSet, err error) {
+func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 	defer cn.errRecover(&err)
 
-	msgs = make(chan *ChangeSet)
+	msgs = make(chan *XLogDataMsg)
 	confirm := make(chan uint64)
 	confirmed := make(chan uint64)
 
@@ -174,20 +166,19 @@ func (cn *conn) StreamQuery(q string) (msgs chan *ChangeSet, err error) {
 					confirm <- lsn
 				}
 			case 'w':
-				var cs ChangeSet
+				var msg XLogDataMsg
 
 				buf := bytes.NewReader(*r)
-				binary.Read(buf, binary.BigEndian, &(cs.Header))
+				binary.Read(buf, binary.BigEndian, &(msg.Header))
 
-				cs.Msg = []byte((*r)[24:])
-				cs.confirm = make(chan uint64)
+				msg.Data = []byte((*r)[24:])
+				msg.confirm = make(chan uint64)
 
-				msgs <- &cs
-
-				TRACE("recv msg header.Start=%v header.End=%v header.Clock=%v len=%v", WAL(cs.Header.Start), WAL(cs.Header.End), cs.Header.Clock, len(cs.Msg))
+				TRACE("recv msg header.Start=%v header.End=%v header.Clock=%v len=%v", WAL(msg.Header.Start), WAL(msg.Header.End), msg.Header.Clock, len(msg.Data))
 
 				// wait for confirmation
-				confirm <- <-cs.confirm
+				msgs <- &msg
+				confirm <- <-msg.confirm
 				<-confirmed
 			}
 		}
