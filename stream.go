@@ -40,7 +40,11 @@ func (msg *XLogDataMsg) Confirm() {
 }
 
 func TRACE(format string, a ...interface{}) {
-	//fmt.Printf("[pq/stream] "+format+"\n", a...)
+	// fmt.Printf("[pq/stream] "+format+"\n", a...)
+}
+
+func INFO(format string, a ...interface{}) {
+	fmt.Printf("[pq/stream] "+format+"\n", a...)
 }
 
 func WAL(i uint64) string {
@@ -118,7 +122,7 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 		for {
 			last := lsn
 			lsn = <-confirm
-			if lsn > last {
+			if lsn >= last {
 				TRACE("confirm lsn=%v last=%v", WAL(lsn), WAL(last))
 				cn.feedback(lsn)
 			}
@@ -146,6 +150,7 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 
 	// main receiver
 	go func() {
+		var lastConfirmedLsn uint64
 		for {
 			t, r := cn.recv1()
 			t = r.byte()
@@ -162,8 +167,12 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 
 				TRACE("keepalive server_lsn=%v time=%v reply=%v", WAL(serverWAL), time, reply)
 
-				if reply > 0 {
-					confirm <- lsn
+				// 1 means that the client should reply to this message as soon as possible, to avoid a timeout disconnect. 0 otherwise.
+				if reply == 1 && lastConfirmedLsn != 0 {
+					INFO("keepalive server_lsn=%v local_lsn=%v time=%v reply=%v (timeout soon)", WAL(serverWAL), WAL(lsn), time, reply)
+					// just resend the last lsn
+					confirm <- lastConfirmedLsn
+					<-confirmed
 				}
 			case 'w':
 				var msg XLogDataMsg
@@ -179,7 +188,7 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 				// wait for confirmation
 				msgs <- &msg
 				confirm <- <-msg.confirm
-				<-confirmed
+				lastConfirmedLsn = <-confirmed
 			}
 		}
 	}()
