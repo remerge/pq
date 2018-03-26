@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// just for some temp debugging - remove later (if still here after 06/2018 just delete)
+var DEBUG_STREAM_TRACE = false
+
 type XLogDataHeader struct {
 	Start uint64
 	End   uint64
@@ -40,11 +43,21 @@ func (msg *XLogDataMsg) Confirm() {
 }
 
 func TRACE(format string, a ...interface{}) {
-	// fmt.Printf("[pq/stream] "+format+"\n", a...)
+	if DEBUG_STREAM_TRACE {
+		fmt.Printf("[pq/stream] "+format+"\n", a...)
+	}
 }
 
 func INFO(format string, a ...interface{}) {
 	fmt.Printf("[pq/stream] "+format+"\n", a...)
+}
+
+func ERROR(err error, format string, a ...interface{}) {
+	if err == nil {
+		return
+	}
+	errString := fmt.Sprintf(" err=%v", err)
+	fmt.Printf("[pq/stream] ERROR: "+format+errString+"\n", a...)
 }
 
 func WAL(i uint64) string {
@@ -71,11 +84,11 @@ func (cn *conn) feedback(lsn uint64) {
 
 	buf := new(bytes.Buffer)
 	err := binary.Write(buf, binary.BigEndian, &response)
-
+	ERROR(err, "feedback message write failed")
 	TRACE("feedback time=%v lsn=%v type=%v err=%v", response.Time, WAL(uint64(response.Write)), string(response.Type), err)
 
 	n, err := cn.c.Write(buf.Bytes())
-
+	ERROR(err, "feedback message write failed")
 	TRACE("feedback written n=%v err=%v", n, err)
 
 	if err != nil {
@@ -161,9 +174,12 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 				var reply byte
 
 				buf := bytes.NewReader(*r)
-				binary.Read(buf, binary.BigEndian, &serverWAL)
-				binary.Read(buf, binary.BigEndian, &time)
-				binary.Read(buf, binary.BigEndian, &reply)
+				err := binary.Read(buf, binary.BigEndian, &serverWAL)
+				ERROR(err, "keepalive read failed")
+				err = binary.Read(buf, binary.BigEndian, &time)
+				ERROR(err, "keepalive read failed")
+				err = binary.Read(buf, binary.BigEndian, &reply)
+				ERROR(err, "keepalive read failed")
 
 				TRACE("keepalive server_lsn=%v time=%v reply=%v", WAL(serverWAL), time, reply)
 
@@ -178,7 +194,8 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 				var msg XLogDataMsg
 
 				buf := bytes.NewReader(*r)
-				binary.Read(buf, binary.BigEndian, &(msg.Header))
+				err := binary.Read(buf, binary.BigEndian, &(msg.Header))
+				ERROR(err, "message read failed")
 
 				msg.Data = []byte((*r)[24:])
 				msg.confirm = make(chan uint64)
