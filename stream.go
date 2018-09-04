@@ -96,15 +96,15 @@ func (cn *conn) feedback(lsn uint64) {
 	}
 }
 
-func (cn *conn) StartReplicationStream(slot string, wal uint64) (msgs chan *XLogDataMsg, err error) {
+func (cn *conn) StartReplicationStream(slot string, wal uint64, quit chan struct{}) (msgs chan *XLogDataMsg, err error) {
 	hi := uint32(wal >> 32)
 	lo := uint32(wal)
 	query := fmt.Sprintf("START_REPLICATION SLOT %s LOGICAL %X/%X", slot, hi, lo)
 	TRACE("start replication query=%v", query)
-	return cn.StreamQuery(query)
+	return cn.StreamQuery(query, quit)
 }
 
-func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
+func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMsg, err error) {
 	defer cn.errRecover(&err)
 
 	msgs = make(chan *XLogDataMsg)
@@ -146,8 +146,6 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 	// keep alive ticker
 	ticker := time.NewTicker(5 * time.Second)
 
-	// terminate later
-	quit := make(chan struct{})
 	go func() {
 		for {
 			select {
@@ -165,50 +163,57 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 	go func() {
 		var lastConfirmedLsn uint64
 		for {
-			if cn.closed {
+			ch := make(chan *readBuf)
+			go func() {
+				defer cn.errRecover(&err)
+				_, r := cn.recv1()
+				ch <- r
+			}()
+			select {
+			case <-quit:
 				return
-			}
-			t, r := cn.recv1()
-			t = r.byte()
+			case r := <-ch:
+				t = r.byte()
 
-			switch t {
-			case 'k':
-				var serverWAL, time uint64
-				var reply byte
+				switch t {
+				case 'k':
+					var serverWAL, time uint64
+					var reply byte
 
-				buf := bytes.NewReader(*r)
-				err := binary.Read(buf, binary.BigEndian, &serverWAL)
-				ERROR(err, "keepalive read failed")
-				err = binary.Read(buf, binary.BigEndian, &time)
-				ERROR(err, "keepalive read failed")
-				err = binary.Read(buf, binary.BigEndian, &reply)
-				ERROR(err, "keepalive read failed")
+					buf := bytes.NewReader(*r)
+					err := binary.Read(buf, binary.BigEndian, &serverWAL)
+					ERROR(err, "keepalive read failed")
+					err = binary.Read(buf, binary.BigEndian, &time)
+					ERROR(err, "keepalive read failed")
+					err = binary.Read(buf, binary.BigEndian, &reply)
+					ERROR(err, "keepalive read failed")
 
-				TRACE("keepalive server_lsn=%v time=%v reply=%v", WAL(serverWAL), time, reply)
+					TRACE("keepalive server_lsn=%v time=%v reply=%v", WAL(serverWAL), time, reply)
 
-				// 1 means that the client should reply to this message as soon as possible, to avoid a timeout disconnect. 0 otherwise.
-				if reply == 1 && lastConfirmedLsn != 0 {
-					INFO("keepalive server_lsn=%v local_lsn=%v time=%v reply=%v (timeout soon)", WAL(serverWAL), WAL(lsn), time, reply)
-					// just resend the last lsn
-					confirm <- lastConfirmedLsn
-					<-confirmed
+					// 1 means that the client should reply to this message as soon as possible, to avoid a timeout disconnect. 0 otherwise.
+					if reply == 1 && lastConfirmedLsn != 0 {
+						INFO("keepalive server_lsn=%v local_lsn=%v time=%v reply=%v (timeout soon)", WAL(serverWAL), WAL(lsn), time, reply)
+						// just resend the last lsn
+						confirm <- lastConfirmedLsn
+						<-confirmed
+					}
+				case 'w':
+					var msg XLogDataMsg
+
+					buf := bytes.NewReader(*r)
+					err := binary.Read(buf, binary.BigEndian, &(msg.Header))
+					ERROR(err, "message read failed")
+
+					msg.Data = []byte((*r)[24:])
+					msg.confirm = make(chan uint64)
+
+					TRACE("recv msg header.Start=%v header.End=%v header.Clock=%v len=%v", WAL(msg.Header.Start), WAL(msg.Header.End), msg.Header.Clock, len(msg.Data))
+
+					// wait for confirmation
+					msgs <- &msg
+					confirm <- <-msg.confirm
+					lastConfirmedLsn = <-confirmed
 				}
-			case 'w':
-				var msg XLogDataMsg
-
-				buf := bytes.NewReader(*r)
-				err := binary.Read(buf, binary.BigEndian, &(msg.Header))
-				ERROR(err, "message read failed")
-
-				msg.Data = []byte((*r)[24:])
-				msg.confirm = make(chan uint64)
-
-				TRACE("recv msg header.Start=%v header.End=%v header.Clock=%v len=%v", WAL(msg.Header.Start), WAL(msg.Header.End), msg.Header.Clock, len(msg.Data))
-
-				// wait for confirmation
-				msgs <- &msg
-				confirm <- <-msg.confirm
-				lastConfirmedLsn = <-confirmed
 			}
 		}
 	}()
