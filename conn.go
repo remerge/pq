@@ -125,8 +125,6 @@ type conn struct {
 	// Whether to always send []byte parameters over as binary.  Enables single
 	// round-trip mode for non-prepared Query calls.
 	binaryParameters bool
-
-	closed bool
 }
 
 // Handle driver-side settings in parsed connection string.
@@ -780,9 +778,6 @@ func (cn *conn) Prepare(q string) (_ driver.Stmt, err error) {
 }
 
 func (cn *conn) Close() (err error) {
-	if cn.closed {
-		return nil
-	}
 	if cn.bad {
 		return driver.ErrBadConn
 	}
@@ -795,12 +790,7 @@ func (cn *conn) Close() (err error) {
 		return err
 	}
 
-	err = cn.c.Close()
-	if err != nil {
-		return err
-	}
-	cn.closed = true
-	return nil
+	return cn.c.Close()
 }
 
 // Implement the "Queryer" interface
