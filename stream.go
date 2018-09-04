@@ -169,6 +169,8 @@ func (cn *conn) StreamQuery(q string) (msgs chan *XLogDataMsg, err error) {
 			t = r.byte()
 
 			switch t {
+			case 'X':
+				break
 			case 'k':
 				var serverWAL, time uint64
 				var reply byte
