@@ -165,8 +165,7 @@ func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMs
 		for {
 			ch := make(chan *readBuf)
 			go func() {
-				var errGoroutine error
-				defer cn.errRecover(&errGoroutine)
+				defer cn.errRecover(&err)
 				_, r := cn.recv1()
 				ch <- r
 			}()
