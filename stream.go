@@ -115,10 +115,10 @@ func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMs
 	b.string(q)
 	cn.send(b)
 
-	t, r := cn.recv1()
+	t, rb := cn.recv1()
 
 	if t == 'E' {
-		return nil, parseError(r)
+		return nil, parseError(rb)
 	}
 
 	if t != 'W' {
@@ -182,8 +182,8 @@ func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMs
 					var reply byte
 
 					buf := bytes.NewReader(*r)
-					err := binary.Read(buf, binary.BigEndian, &serverWAL)
-					ERROR(err, "keepalive read failed")
+					readErr := binary.Read(buf, binary.BigEndian, &serverWAL)
+					ERROR(readErr, "keepalive read failed")
 					err = binary.Read(buf, binary.BigEndian, &ts)
 					ERROR(err, "keepalive read failed")
 					err = binary.Read(buf, binary.BigEndian, &reply)
@@ -193,7 +193,7 @@ func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMs
 
 					// 1 means that the client should reply to this message as soon as possible, to avoid a timeout disconnect. 0 otherwise.
 					if reply == 1 && lastConfirmedLsn != 0 {
-						INFO("keepalive server_lsn=%v local_lsn=%v time=%v reply=%v (timeout soon)", WAL(serverWAL), WAL(lsn), ts, reply)
+						INFO("keepalive server_lsn=%v local_lsn=%v time=%v reply=%v (timeout soon)", WAL(serverWAL), WAL(lastConfirmedLsn), ts, reply)
 						// just resend the last lsn
 						confirm <- lastConfirmedLsn
 						<-confirmed
@@ -202,8 +202,8 @@ func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMs
 					var msg XLogDataMsg
 
 					buf := bytes.NewReader(*r)
-					err := binary.Read(buf, binary.BigEndian, &(msg.Header))
-					ERROR(err, "message read failed")
+					readErr := binary.Read(buf, binary.BigEndian, &(msg.Header))
+					ERROR(readErr, "message read failed")
 
 					msg.Data = []byte((*r)[24:])
 					msg.confirm = make(chan uint64)
