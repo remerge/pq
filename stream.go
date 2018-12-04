@@ -96,6 +96,10 @@ func (cn *conn) feedback(lsn uint64) {
 	}
 }
 
+type ReplicationStreamer interface {
+	StartReplicationStream(slot string, wal uint64, quit chan struct{}) (msgs chan *XLogDataMsg, err error)
+}
+
 func (cn *conn) StartReplicationStream(slot string, wal uint64, quit chan struct{}) (msgs chan *XLogDataMsg, err error) {
 	hi := uint32(wal >> 32)
 	lo := uint32(wal)
@@ -127,28 +131,24 @@ func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMs
 
 	// now we are in streaming mode
 
-	// current lsn
-	var lsn uint64 = 0
-
-	// confirm channel
 	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		// current lsn
+		var lsn uint64 = 0
+
 		for {
 			last := lsn
-			lsn = <-confirm
-			if lsn >= last {
-				TRACE("confirm lsn=%v last=%v", WAL(lsn), WAL(last))
-				cn.feedback(lsn)
-			}
-			confirmed <- lsn
-		}
-	}()
 
-	// keep alive ticker
-	ticker := time.NewTicker(5 * time.Second)
-
-	go func() {
-		for {
 			select {
+			case lsn = <-confirm:
+				if lsn >= last {
+					TRACE("confirm lsn=%v last=%v", WAL(lsn), WAL(last))
+					cn.feedback(lsn)
+				}
+				confirmed <- lsn
+
 			case <-ticker.C:
 				TRACE("send keepalive lsn=%v", WAL(lsn))
 				cn.feedback(lsn)

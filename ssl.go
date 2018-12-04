@@ -86,14 +86,14 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	// user.Current() might fail when cross-compiling. We have to ignore the
 	// error and continue without home directory defaults, since we wouldn't
 	// know from where to load them.
-	user, _ := user.Current()
+	currentUser, _ := user.Current()
 
 	// In libpq, the client certificate is only loaded if the setting is not blank.
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1036-L1037
 	sslcert := o["sslcert"]
-	if len(sslcert) == 0 && user != nil {
-		sslcert = filepath.Join(user.HomeDir, ".postgresql", "postgresql.crt")
+	if len(sslcert) == 0 && currentUser != nil {
+		sslcert = filepath.Join(currentUser.HomeDir, ".postgresql", "postgresql.crt")
 	}
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1045
 	if len(sslcert) == 0 {
@@ -110,8 +110,8 @@ func sslClientCertificates(tlsConf *tls.Config, o values) error {
 	//
 	// https://github.com/postgres/postgres/blob/REL9_6_2/src/interfaces/libpq/fe-secure-openssl.c#L1123-L1222
 	sslkey := o["sslkey"]
-	if len(sslkey) == 0 && user != nil {
-		sslkey = filepath.Join(user.HomeDir, ".postgresql", "postgresql.key")
+	if len(sslkey) == 0 && currentUser != nil {
+		sslkey = filepath.Join(currentUser.HomeDir, ".postgresql", "postgresql.key")
 	}
 
 	if len(sslkey) > 0 {
