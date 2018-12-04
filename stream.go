@@ -178,22 +178,22 @@ func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMs
 
 				switch t {
 				case 'k':
-					var serverWAL, time uint64
+					var serverWAL, ts uint64
 					var reply byte
 
 					buf := bytes.NewReader(*r)
 					err := binary.Read(buf, binary.BigEndian, &serverWAL)
 					ERROR(err, "keepalive read failed")
-					err = binary.Read(buf, binary.BigEndian, &time)
+					err = binary.Read(buf, binary.BigEndian, &ts)
 					ERROR(err, "keepalive read failed")
 					err = binary.Read(buf, binary.BigEndian, &reply)
 					ERROR(err, "keepalive read failed")
 
-					TRACE("keepalive server_lsn=%v time=%v reply=%v", WAL(serverWAL), time, reply)
+					TRACE("keepalive server_lsn=%v time=%v reply=%v", WAL(serverWAL), ts, reply)
 
 					// 1 means that the client should reply to this message as soon as possible, to avoid a timeout disconnect. 0 otherwise.
 					if reply == 1 && lastConfirmedLsn != 0 {
-						INFO("keepalive server_lsn=%v local_lsn=%v time=%v reply=%v (timeout soon)", WAL(serverWAL), WAL(lsn), time, reply)
+						INFO("keepalive server_lsn=%v local_lsn=%v time=%v reply=%v (timeout soon)", WAL(serverWAL), WAL(lsn), ts, reply)
 						// just resend the last lsn
 						confirm <- lastConfirmedLsn
 						<-confirmed
