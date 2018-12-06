@@ -7,6 +7,7 @@ package pq
 import (
 	"os"
 	"os/user"
+	"github.com/lib/pq"
 )
 
 func userCurrent() (string, error) {
@@ -20,5 +21,5 @@ func userCurrent() (string, error) {
 		return name, nil
 	}
 
-	return "", ErrCouldNotDetectUsername
+	return "", pq.ErrCouldNotDetectUsername
 }
