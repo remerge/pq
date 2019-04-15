@@ -144,6 +144,7 @@ const (
 	T__regconfig       Oid = 3735
 	T_regdictionary    Oid = 3769
 	T__regdictionary   Oid = 3770
+	T_jsonb            Oid = 3802
 	T_anyrange         Oid = 3831
 	T_event_trigger    Oid = 3838
 	T_int4range        Oid = 3904
