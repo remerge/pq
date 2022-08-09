@@ -205,7 +205,9 @@ func (cn *conn) StreamQuery(q string, quit chan struct{}) (msgs chan *XLogDataMs
 					err := binary.Read(buf, binary.BigEndian, &(msg.Header))
 					ERROR(err, "message read failed")
 
-					msg.Data = []byte((*r)[24:])
+					data := (*r)[24:]
+					msg.Data = make([]byte, len(data))
+					copy(msg.Data, data)
 					msg.confirm = make(chan uint64)
 
 					TRACE("recv msg header.Start=%v header.End=%v header.Clock=%v len=%v", WAL(msg.Header.Start), WAL(msg.Header.End), msg.Header.Clock, len(msg.Data))
