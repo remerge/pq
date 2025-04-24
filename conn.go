@@ -3,6 +3,7 @@ package pq
 import (
 	"bufio"
 	"crypto/md5"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
@@ -1250,6 +1251,54 @@ func (cn *conn) auth(r *readBuf, o values) {
 		if r.int32() != 0 {
 			errorf("unexpected authentication response: %q", t)
 		}
+	case 10:
+		sc := NewScramClient(sha256.New, o["user"], o["password"])
+		sc.Step(nil)
+		if sc.Err() != nil {
+			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+		}
+		scOut := sc.Out()
+
+		w := cn.writeBuf('p')
+		w.string("SCRAM-SHA-256")
+		w.int32(len(scOut))
+		w.bytes(scOut)
+		cn.send(w)
+
+		t, r := cn.recv()
+		if t != 'R' {
+			errorf("unexpected password response: %q", t)
+		}
+
+		if r.int32() != 11 {
+			errorf("unexpected authentication response: %q", t)
+		}
+
+		nextStep := r.next(len(*r))
+		sc.Step(nextStep)
+		if sc.Err() != nil {
+			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+		}
+
+		scOut = sc.Out()
+		w = cn.writeBuf('p')
+		w.bytes(scOut)
+		cn.send(w)
+
+		t, r = cn.recv()
+		if t != 'R' {
+			errorf("unexpected password response: %q", t)
+		}
+
+		if r.int32() != 12 {
+			errorf("unexpected authentication response: %q", t)
+		}
+
+		nextStep = r.next(len(*r))
+		sc.Step(nextStep)
+		if sc.Err() != nil {
+			errorf("SCRAM-SHA-256 error: %s", sc.Err().Error())
+		}
 	default:
 		errorf("unknown authentication response: %d", code)
 	}
@@ -1510,9 +1559,9 @@ func (rs *rows) Next(dest []driver.Value) (err error) {
 // QuoteIdentifier quotes an "identifier" (e.g. a table or a column name) to be
 // used as part of an SQL statement.  For example:
 //
-//    tblname := "my_table"
-//    data := "my_data"
-//    err = db.Exec(fmt.Sprintf("INSERT INTO %s VALUES ($1)", pq.QuoteIdentifier(tblname)), data)
+//	tblname := "my_table"
+//	data := "my_data"
+//	err = db.Exec(fmt.Sprintf("INSERT INTO %s VALUES ($1)", pq.QuoteIdentifier(tblname)), data)
 //
 // Any double quotes in name will be escaped.  The quoted identifier will be
 // case sensitive when used in a query.  If the input string contains a zero
